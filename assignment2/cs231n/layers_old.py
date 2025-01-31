@@ -924,30 +924,28 @@ def spatial_groupnorm_forward(x, gamma, beta, G, gn_param):
     # and layer normalization!                                                #
     ###########################################################################
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
-    # I cant remember what I was doing in layers_old.py so I rewrote this
-
     # NOTE: see soln for more elegant ones.
     # key idea is layer norm averages over D and preserves N for (N D) tensor
     # so if we transform (N C H W) tensor into (N*G C/G*H*W), can insert
     # directly into layernorm function without loops
     N, C, H, W = x.shape
-    # better way is numpy.tile
-    gamma_broadcast = gamma * np.ones((1, 1, H, W))
-    beta_broadcast = beta * np.ones((1, 1, H, W))
-    group_size = C//G
-    out_list = []
+    xReshape = np.moveaxis(x,1,-1)
+    xReshape = xReshape.reshape(-1,C)
+
+    gamma = np.squeeze(gamma)
+    beta = np.squeeze(beta)
+
     cache = []
+    lnStack = []
     for i in range(G):
-        layer = x[:, i*group_size:(i+1)*group_size, :, :].reshape(N, -1)
-        gamma_layer = gamma_broadcast[:, i*group_size:(i+1)*group_size, :, :].reshape(-1)
-        beta_layer = beta_broadcast[:, i*group_size:(i+1)*group_size, :, :].reshape(-1)
+      lnOut, lnCache = layernorm_forward(xReshape[:,i*C//N:(i+1)*C//N], 
+      gamma[i*C//N:(i+1)*C//N], beta[i*C//N:(i+1)*C//N], gn_param)
+      cache.append(lnCache)
+      lnStack.append(lnOut)
 
-        ln_out, ln_cache = layernorm_forward(layer, gamma_layer, beta_layer, gn_param)
-        out_list.append(ln_out.reshape(N, group_size, H, W))
-        cache.append(ln_cache)
-
-    out = np.concatenate(out_list, axis=1)
-    
+    out = np.concatenate(lnStack, axis=1)
+    out = out.reshape(N, H, W, C)
+    out = np.moveaxis(out,-1,1)
 
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
     ###########################################################################
@@ -975,25 +973,23 @@ def spatial_groupnorm_backward(dout, cache):
     # This will be extremely similar to the layer norm implementation.        #
     ###########################################################################
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
-    # I cant remember what I was doing in layers_old.py so I rewrote this
     N, C, H, W = dout.shape
-    G = len(cache)
-    group_size = C//G
+    doutReshape = np.moveaxis(dout,1,-1)
+    doutReshape = doutReshape.reshape(-1,C)
 
-    dx_list = []
-    dgamma_list = []
-    dbeta_list = []
-    for i in range(G):
-        layer_dout = dout[:, i*group_size:(i+1)*group_size, :, :].reshape(N, -1)
-        ln_dx, ln_dgamma, ln_dbeta = layernorm_backward(layer_dout, cache[i])
-        dx_list.append(ln_dx.reshape(N, group_size, H, W))
-        dgamma_list.append(ln_dgamma.reshape(1, group_size, H, W).sum(axis=(2,3), keepdims=True))
-        dbeta_list.append(ln_dbeta.reshape(1, group_size, H, W).sum(axis=(2,3), keepdims=True))
+    dxStack = []
+    dgammaStack = []
+    dbetaStack = []
+    for i, subcache in enumerate(cache):
+      dxL, dgammaL, dbetaL = layernorm_backward(doutReshape[:,i*C//N:(i+1)*C//N], subcache)
+      dxStack.append(dxL)
+      dgammaStack.append(dgammaL)
+      dbetaStack.append(dbetaL)
 
-    dx = np.concatenate(dx_list, axis=1)
-    dgamma = np.concatenate(dgamma_list, axis=1)
-    dbeta = np.concatenate(dbeta_list, axis=1)
 
+    dx = np.moveaxis(np.concatenate(dxStack, axis=1).reshape(N, H, W, C),-1,1)
+    dgamma = np.concatenate(dgammaStack).reshape(1,C,1,1)
+    dbeta = np.concatenate(dbetaStack).reshape(1,C,1,1)
 
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
     ###########################################################################
