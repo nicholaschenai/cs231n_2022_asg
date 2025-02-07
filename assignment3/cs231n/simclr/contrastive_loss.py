@@ -164,6 +164,8 @@ def simclr_loss_vectorized(out_left, out_right, tau, device='cuda'):
     # Option 1: Extract the corresponding indices from sim_matrix. 
     # Option 2: Use sim_positive_pairs().
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
+
+    # easier way: exponential[torch.arange(0, N),torch.arange(N-1, 2*N-1)]
     gather_idx = torch.arange(N-1,2*N-1, dtype=torch.int64).view(-1,1).to(device=device)
     num_sim = exponential[:N].gather(1, gather_idx).squeeze()
 
